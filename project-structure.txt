@@ -1,0 +1,178 @@
+TEST-AUTOMATION-PLATFORM
+│   .gitignore
+│   docker-compose.yml
+│   package.json
+│   pytest.ini
+│   README.md
+│   requirements.txt
+│
+├───frontend
+│   └───test-platform
+│       │   .gitignore
+│       │   eslint.config.js
+│       │   index.html
+│       │   package.json
+│       │   vite.config.js
+│       │
+│       └───src
+│           │   App.jsx
+│           │   index.css
+│           │   main.jsx
+│           │
+│           ├───api
+│           │       axiosConfig.js
+│           │
+│           ├───components
+│           │   ├───APIBatchTester
+│           │   │       APIBatchTester.css
+│           │   │       APIBatchTester.jsx
+│           │   ├───APIMatrixTester
+│           │   │       APIMatrixTester.css
+│           │   │       APIMatrixTester.jsx
+│           │   ├───Header
+│           │   │       Header.css
+│           │   │       Header.jsx
+│           │   ├───IssueList
+│           │   │       IssueList.css
+│           │   │       IssueList.jsx
+│           │   ├───IssuePanel
+│           │   │       IssuePanel.css
+│           │   │       IssuePanel.jsx
+│           │   ├───JiraHistory
+│           │   │       JiraHistory.css
+│           │   │       JiraHistory.jsx
+│           │   ├───MainScreen
+│           │   │       MainScreen.css
+│           │   │       MainScreen.jsx
+│           │   ├───NetworkConfig
+│           │   │       NetworkConfig.css
+│           │   │       NetworkConfig.jsx
+│           │   ├───Sidebar
+│           │   │       Sidebar.css
+│           │   │       Sidebar.jsx
+│           │   ├───TestScreen
+│           │   │       TestScreen.css
+│           │   │       TestScreen.jsx
+│           │   └───UIScreenshotIssues
+│           │           UIScreenshotIssues.css
+│           │           UIScreenshotIssues.jsx
+│           │
+│           ├───pages
+│           │       IssueListPage.jsx
+│           │       TicketHistoryPage.jsx
+│           │
+│           └───services
+│                   issueService.js
+│                   jiraService.js
+│
+├───new_backend
+│   │   main.py
+│   │
+│   ├───core
+│   │       constants.py
+│   │       events.py
+│   │       logger.py
+│   │       state.py
+│   │       utils.py
+│   │       websocket.py
+│   │
+│   └───modules
+│       ├───api_testing
+│       │   │   config.py
+│       │   │   db_service.py
+│       │   │   docker-compose.yml
+│       │   │   load_test.js
+│       │   │   mitm_script.py
+│       │   │   models.py
+│       │   │   routes.py
+│       │   │   service.py
+│       │   └───k6_scripts
+│       ├───jira
+│       │       jira_attachment.py
+│       │       jira_config.py
+│       │       jira_service.py
+│       │       models.py
+│       │       mongo_config.py
+│       │       mongo_jira_integration.py
+│       │       mongo_operations.py
+│       │       routes.py
+│       │       service.py
+│       │       __init__.py
+│       ├───llm
+│       │       generate_jira_desc.py
+│       │       models.py
+│       │       routes.py
+│       │       service.py
+│       ├───network_simulate
+│       │       models.py
+│       │       network_config.json
+│       │       network_proxy.py
+│       │       routes.py
+│       │       service.py
+│       │       simulator.py
+│       ├───slack
+│       │       config.py
+│       │       models.py
+│       │       routes.py
+│       │       service.py
+│       └───test_runner
+│           │   gdrive_loader.py
+│           │   models.py
+│           │   routes.py
+│           │   service.py
+│           └───static
+│               └───icons
+│                       Krishivaas Farmer.png
+│                       statefarmerstaging(304).png
+│
+├───tests
+│   │   action_executor.py
+│   │   browser_manager.py
+│   │   conftest.py
+│   │   profiler.py
+│   │   test_runner.py
+│   │
+│   ├───locators
+│   │       regular_client.json
+│   │       regular_farmer.json
+│   │       state_client.json
+│   │
+│   ├───test_cases
+│   │   ├───regular_client_test_cases
+│   │   │       login_pytest.py
+│   │   │       onboarding_pytest.py
+│   │   │       test_login_pytest.py
+│   │   ├───regular_farmer_test_cases
+│   │   │       TestOnboarding.py
+│   │   │       test_login_pytest.py
+│   │   └───state_client_test_cases
+│   │           test_login_pytest.py
+│   │           test_Onboarding.py
+│   │
+│   ├───utils
+│   │       ai_agent.py
+│   │       api_validator.py
+│   │       ocr_utils.py
+│   │       test_flow_logger.py
+│   │       test_logger.py
+│   │       touch_utils.py
+│   │       ui_actions.py
+│   │       wait_utils.py
+│   │       __init__.py
+│   │
+│   └───web
+│       ├───data
+│       │       login_data.json
+│       │       onboarding_data.json
+│       ├───locators
+│       │       login.json
+│       │       onboarding.json
+│       ├───pages
+│       │       login_page.py
+│       │       onboarding_page.py
+│       └───regular_web_test_cases
+│               login_test.py
+│               storage_state.json
+│
+└───ui-parser
+        ui_screenshot_validator.py
