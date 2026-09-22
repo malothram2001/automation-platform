@@ -1,0 +1,249 @@
+.tap-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 58px;
+  padding: 0 18px;
+  background: var(--tap-surface);
+  border-bottom: 1px solid var(--tap-border);
+  flex-shrink: 0;
+}
+
+.tap-topbar-menu {
+  display: none;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--tap-text-2);
+  cursor: pointer;
+}
+
+.tap-topbar-menu:hover {
+  background: var(--tap-muted-soft);
+}
+
+/* Context selectors */
+.tap-topbar-context {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.tap-ctx {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.tap-ctx-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--tap-text-3);
+  padding-left: 2px;
+}
+
+.tap-ctx-select {
+  height: 28px;
+  max-width: 190px;
+  padding: 0 26px 0 8px;
+  border: 1px solid var(--tap-border);
+  border-radius: 7px;
+  background: var(--tap-surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.5'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 7px center;
+  appearance: none;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--tap-text);
+  cursor: pointer;
+  text-overflow: ellipsis;
+}
+
+.tap-ctx-select:disabled {
+  cursor: default;
+  color: var(--tap-text-2);
+  background-image: none;
+  padding-right: 8px;
+}
+
+.tap-ctx-select:focus {
+  outline: none;
+  border-color: var(--tap-primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+/* Search */
+.tap-topbar-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  max-width: 380px;
+  margin-left: auto;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--tap-border);
+  border-radius: 999px;
+  background: var(--tap-surface-2);
+  color: var(--tap-text-3);
+}
+
+.tap-topbar-search:focus-within {
+  border-color: var(--tap-primary);
+  background: var(--tap-surface);
+}
+
+.tap-topbar-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  color: var(--tap-text);
+}
+
+.tap-topbar-search input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.tap-topbar-results {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 40;
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  border-radius: 10px;
+  background: var(--tap-surface);
+  border: 1px solid var(--tap-border);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
+}
+
+.tap-topbar-results button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--tap-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.tap-topbar-results button:hover {
+  background: var(--tap-primary-soft);
+}
+
+.tap-topbar-results svg {
+  color: var(--tap-text-3);
+  flex-shrink: 0;
+}
+
+.tap-topbar-results small {
+  margin-left: auto;
+  color: var(--tap-text-3);
+  font-size: 11.5px;
+}
+
+/* Right side */
+.tap-topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.tap-topbar-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--tap-muted-soft);
+  color: var(--tap-text-2);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.tap-topbar-status.is-live {
+  background: var(--tap-danger-soft);
+  color: var(--tap-danger);
+}
+
+.tap-topbar-status.is-live svg {
+  animation: tap-blink 1.2s ease-in-out infinite;
+}
+
+.tap-topbar-icon {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--tap-text-2);
+  cursor: pointer;
+}
+
+.tap-topbar-icon:hover {
+  background: var(--tap-muted-soft);
+  color: var(--tap-text);
+}
+
+.tap-topbar-badge {
+  position: absolute;
+  top: 3px;
+  right: 2px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--tap-danger);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+@media (max-width: 1240px) {
+  .tap-topbar-context .tap-ctx:nth-child(-n + 2) {
+    display: none;   /* keep Variant + Environment, drop Project/Application */
+  }
+}
+
+@media (max-width: 900px) {
+  .tap-topbar-menu {
+    display: grid;
+  }
+
+  .tap-topbar-search {
+    max-width: none;
+  }
+
+  .tap-topbar-context {
+    display: none;
+  }
+}

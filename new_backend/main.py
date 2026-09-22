@@ -11,6 +11,9 @@ from new_backend.modules.api_testing.routes import router as api_testing_router
 from new_backend.core.websocket import router as websocket_router
 from new_backend.modules.slack.routes import router as slack_router
 from new_backend.modules.network_simulate.routes import router as network_simulate_router
+from new_backend.modules.platform_hub.routes import router as platform_router
+from new_backend.modules.test_management.routes import router as test_management_router
+from new_backend.modules.reporting.routes import router as reports_router
 from new_backend.core.events import lifespan
 
 if sys.platform == "win32":
@@ -41,6 +44,9 @@ app.include_router(llm_router, prefix="/llm")
 app.include_router(slack_router, prefix="/slack")
 app.include_router(api_testing_router, prefix="/api-testing")
 app.include_router(network_simulate_router, prefix="/network-simulate")
+app.include_router(platform_router, prefix="/platform")
+app.include_router(test_management_router, prefix="/test-management")
+app.include_router(reports_router, prefix="/reports")
 
 # Health Check
 
