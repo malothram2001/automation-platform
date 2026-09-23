@@ -2,7 +2,6 @@ from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-TestType = Literal["Functional", "Negative", "Regression", "Smoke", "Integration", "Usability"]
 Priority = Literal["High", "Medium", "Low"]
 AutomationStatus = Literal["Automated", "Manual", "Not Automated"]
 CaseStatus = Literal["Active", "Draft", "Deprecated"]
@@ -17,7 +16,7 @@ class TestCaseInput(BaseModel):
     """A manually authored test case (Test Management → Test Cases → New)."""
     title: str = Field(min_length=1, max_length=300)
     module: str = "General"
-    test_type: TestType = "Functional"
+    test_type: str = ""            # canonical id from test_types.py; blank → the default type
     priority: Priority = "Medium"
     automation_status: AutomationStatus = "Manual"
     status: CaseStatus = "Active"

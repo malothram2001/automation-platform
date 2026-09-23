@@ -484,6 +484,7 @@ async def post_run_notify(
     app_version:    str,
     developer_name: str,
     channel_id:     str,
+    run_meta:       dict | None = None,   # test types / environment / device, stored with the report
 ) -> None:
     loop = asyncio.get_event_loop()
 
@@ -539,7 +540,8 @@ async def post_run_notify(
                 app_name=app_name,
                 app_version=app_version,
                 developer_name=developer_name,
-                run_id=run_id
+                run_id=run_id,
+                run_meta=run_meta,
             ),
         )
         log_to_ui(f"[{run_id[:8]}] Step 1 done", "SUCCESS")

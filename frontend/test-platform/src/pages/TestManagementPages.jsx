@@ -7,13 +7,14 @@ import {
   Button, DataState, DataTable, EmptyState, Field, Grid, Modal, Page, Panel, Pill, RefreshButton, StackedBar,
   StatCard, StatGrid, StatusBadge, Tabs,
 } from '../components/ui/ui';
+import { TestTypeBadge, TestTypeFilter, TestTypeList } from '../components/ui/TestTypes';
+import useTestTypes from '../hooks/useTestTypes';
 import ResultsTable from './common/ResultsTable';
 import useApi from '../hooks/useApi';
 import { API_URL, apiFetch } from '../config/api';
 import { useWorkspace } from '../context/workspaceContext';
 import { downloadCsv, formatDateTime, formatDuration, passRateTone, pct, timeAgo } from '../utils/format';
 
-const TEST_TYPES = ['Functional', 'Negative', 'Regression', 'Smoke', 'Integration', 'Usability'];
 const PRIORITIES = ['High', 'Medium', 'Low'];
 const AUTOMATION = ['Automated', 'Manual', 'Not Automated'];
 const STATUSES = ['Active', 'Draft', 'Deprecated'];
@@ -21,7 +22,7 @@ const PRIORITY_TONES = { High: 'danger', Medium: 'warn', Low: 'muted' };
 const PAGE_SIZE = 15;
 
 const EMPTY_CASE = {
-  title: '', module: '', test_type: 'Functional', priority: 'Medium', automation_status: 'Manual',
+  title: '', module: '', test_type: '', priority: 'Medium', automation_status: 'Manual',
   status: 'Active', variant: '', tags: '', description: '', preconditions: '', expected_result: '',
   test_data: '', steps: [{ action: '', expected: '' }], author: '',
 };
@@ -30,6 +31,7 @@ const EMPTY_CASE = {
 
 export function TestCasesPage() {
   const cases = useApi('/test-management/cases');
+  const testTypes = useTestTypes();
   const { context, variant: ctxVariant } = useWorkspace();
 
   const [query, setQuery] = useState('');
@@ -97,10 +99,14 @@ export function TestCasesPage() {
 
   const exportCsv = () => downloadCsv('tap-test-cases.csv', [
     { key: 'code', header: 'ID' }, { key: 'title', header: 'Title' }, { key: 'module', header: 'Module' },
-    { key: 'test_type', header: 'Test Type' }, { key: 'priority', header: 'Priority' },
+    { key: 'test_type_label', header: 'Test Type' }, { key: 'priority', header: 'Priority' },
     { key: 'automation_status', header: 'Automation' }, { key: 'status', header: 'Status' },
     { key: 'suite_label', header: 'Variant' }, { key: 'file', header: 'File' },
-  ], rows.map((c) => ({ ...c, tags: (c.tags || []).join(' ') })));
+  ], rows.map((c) => ({
+    ...c,
+    test_type_label: c.test_type_label || testTypes.label(c.test_type),
+    tags: (c.tags || []).join(' '),
+  })));
 
   return (
     <Page
@@ -135,10 +141,11 @@ export function TestCasesPage() {
               <option value="all">All modules</option>
               {modules.map((m) => <option key={m} value={m}>{m}</option>)}
             </select>
-            <select className="tap-select" value={filters.type} onChange={(e) => setFilters({ ...filters, type: e.target.value })} aria-label="Filter by test type">
-              <option value="all">All test types</option>
-              {TEST_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-            </select>
+            <TestTypeFilter
+              value={filters.type}
+              counts={cases.data?.type_counts}
+              onChange={(value) => { setFilters({ ...filters, type: value }); setPage(0); }}
+            />
             <select className="tap-select" value={filters.automation} onChange={(e) => setFilters({ ...filters, automation: e.target.value })} aria-label="Filter by automation status">
               <option value="all">All automation</option>
               {AUTOMATION.map((a) => <option key={a} value={a}>{a}</option>)}
@@ -177,7 +184,7 @@ export function TestCasesPage() {
                       ),
                     },
                     { key: 'module', header: 'Module' },
-                    { key: 'test_type', header: 'Test Type', render: (c) => <Pill>{c.test_type}</Pill> },
+                    { key: 'test_type', header: 'Test Type', render: (c) => <TestTypeBadge type={c.test_type} label={c.test_type_label} /> },
                     { key: 'priority', header: 'Priority', render: (c) => <Pill tone={PRIORITY_TONES[c.priority]}>{c.priority}</Pill> },
                     {
                       key: 'automation_status', header: 'Automation',
@@ -264,7 +271,7 @@ function CaseDetail({ testCase: c, onClose, onEdit, onDelete }) {
       {tab === 'details' && (
         <dl className="tap-dl">
           <dt>Module</dt><dd>{c.module}</dd>
-          <dt>Test type</dt><dd>{c.test_type}</dd>
+          <dt>Test type</dt><dd><TestTypeBadge type={c.test_type} label={c.test_type_label} /></dd>
           <dt>Priority</dt><dd><Pill tone={PRIORITY_TONES[c.priority]}>{c.priority}</Pill></dd>
           <dt>Automation</dt><dd>{c.automation_status}</dd>
           <dt>Status</dt><dd>{c.status}</dd>
@@ -341,6 +348,7 @@ function CaseDetail({ testCase: c, onClose, onEdit, onDelete }) {
 
 /* Create / edit dialog */
 function CaseEditor({ editor, variants, onClose, onSave }) {
+  const types = useTestTypes();
   const [values, setValues] = useState(editor?.values || EMPTY_CASE);
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -407,8 +415,8 @@ function CaseEditor({ editor, variants, onClose, onSave }) {
           </select>
         </Field>
         <Field label="Test type">
-          <select className="tap-select" value={values.test_type} onChange={(e) => set({ test_type: e.target.value })}>
-            {TEST_TYPES.map((t) => <option key={t}>{t}</option>)}
+          <select className="tap-select" value={values.test_type || types.defaultType} onChange={(e) => set({ test_type: e.target.value })}>
+            {types.types.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
           </select>
         </Field>
         <Field label="Priority">
@@ -561,6 +569,8 @@ export function TestSuitesPage() {
                   <dl className="tap-dl">
                     <dt>Files</dt>
                     <dd>{s.files.map((f) => <div key={f} className="tap-mono tap-truncate" title={f}><FileCode2 size={12} aria-hidden /> {f.split('/').pop()}</div>)}</dd>
+                    <dt>Test types</dt>
+                    <dd><TestTypeList counts={s.type_counts} max={8} empty="No test cases" /></dd>
                     {s.features.length > 0 && (<><dt>Features</dt><dd className="tap-pill-row">{s.features.map((f) => <Pill key={f}>{f}</Pill>)}</dd></>)}
                     {s.planned_modules.length > 0 && (<><dt>Planned modules</dt><dd className="tap-pill-row">{s.planned_modules.map((m) => <Pill key={m} tone="primary">{m}</Pill>)}</dd></>)}
                   </dl>
@@ -618,6 +628,7 @@ export function TestRunsPage() {
               columns={[
                 { key: 'app', header: 'App', render: (r) => <><div className="tap-cell-main">{r.app_name || 'Resolving APK…'}</div><div className="tap-cell-sub">{r.app_version ? `v${r.app_version}` : r.run_id.slice(0, 8)}</div></> },
                 { key: 'variant', header: 'Variant', render: (r) => r.variant_label || r.app_variant || '—' },
+                { key: 'test_types', header: 'Test Types', render: (r) => <TestTypeList types={r.test_types || []} /> },
                 { key: 'developer', header: 'Owner', render: (r) => r.developer || '—' },
                 { key: 'status', header: 'Status', render: (r) => <StatusBadge status={r.status} /> },
                 { key: 'started', header: 'Started', render: (r) => formatDateTime(r.started_at) },

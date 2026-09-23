@@ -1,6 +1,6 @@
 from fastapi import APIRouter, BackgroundTasks, HTTPException
-from .models import TestRequest, ExistingTestRequest, RunCompleteEvent, LogMessage
-from .service import start_test_flow, stop_test_flow, start_test_existing_flow, list_apks_flow, appium_start_flow, appium_status_flow, appium_stop_flow, allure_start_flow, device_status_flow, run_complete_flow, module_status_flow, api_generate_report_flow, log_step_flow
+from .models import TestRequest, ExistingTestRequest, RunCompleteEvent, LogMessage, WebTestRequest
+from .service import start_web_test_flow, start_test_flow, stop_test_flow, start_test_existing_flow, list_apks_flow, appium_start_flow, appium_status_flow, appium_stop_flow, allure_start_flow, device_status_flow, run_complete_flow, module_status_flow, api_generate_report_flow, log_step_flow
 
 router = APIRouter()
 
@@ -37,9 +37,16 @@ async def module_status(data: dict):
 async def start_test(request: TestRequest, background_tasks: BackgroundTasks):
     return await start_test_flow(request, background_tasks, manager)
 
-@router.post("/start-test-existing")
+@router.post("/start-test-existing", deprecated=True)
 async def start_test_existing(request: ExistingTestRequest, background_tasks: BackgroundTasks):
+    """Legacy mobile run (Run Tests screen). Mobile Testing now posts to
+    /api/v1/executions, which owns run isolation, per-run events and results."""
     return await start_test_existing_flow(request, background_tasks, manager)
+
+@router.post("/start-web-test", deprecated=True)
+async def start_web_test(request: WebTestRequest, background_tasks: BackgroundTasks):
+    """Legacy web run. Web Testing now posts to /api/v1/executions (WebEngine)."""
+    return await start_web_test_flow(request, background_tasks, manager)
 
 @router.get("/apk-list")
 async def list_apks():

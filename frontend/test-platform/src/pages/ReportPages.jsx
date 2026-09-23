@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import {
   Activity, AlertOctagon, Award, BarChart3, CheckCircle2, ClipboardList, Cpu, Download, ExternalLink, FileBarChart,
-  FileText, Gauge, Globe, Loader2, Medal, PieChart, RefreshCw, Rocket, Server, Shuffle, Smartphone, Timer, Webhook, XCircle,
+  FileText, Gauge, Globe, Loader2, Medal, PieChart, RefreshCw, Rocket, Server, Shuffle, Smartphone, Tag, Timer,
+  Webhook, XCircle,
 } from 'lucide-react';
 import {
   Button, DataState, DataTable, EmptyState, ErrorNotice, Grid, Page, Panel, Pill, ProgressBar, RefreshButton,
@@ -10,6 +11,7 @@ import {
 import {
   CategoryBars, OutcomeBars, PassRateTrend, ReadinessGates, ResultDonut, ScoreRing, VerdictBanner,
 } from '../components/insights/Insights';
+import { TestTypeBadge, TestTypeFilter } from '../components/ui/TestTypes';
 import ResultsTable from './common/ResultsTable';
 import useApi from '../hooks/useApi';
 import { apiFetch } from '../config/api';
@@ -48,6 +50,11 @@ function groupBy(results, key) {
   return Object.values(groups).map((g) => ({ ...g, pass_rate: g.total ? Math.round((g.passed * 1000) / g.total) / 10 : null }));
 }
 
+/** Counts per test type for the type filter's dropdown. */
+function typeCounts(results) {
+  return results.reduce((acc, r) => ({ ...acc, [r.test_type]: (acc[r.test_type] || 0) + 1 }), {});
+}
+
 function statOf(results) {
   const stat = { passed: 0, failed: 0, broken: 0, skipped: 0, unknown: 0, total: results.length };
   for (const r of results) stat[r.status in stat ? r.status : 'unknown'] += 1;
@@ -59,6 +66,18 @@ function statOf(results) {
 function PlatformReport({ platform, description, icon, emptyTitle, emptyBody, workspacePath, workspaceLabel }) {
   const state = useSummary();
   const [tab, setTab] = useState('overview');
+  const [typeFilter, setTypeFilter] = useState('all');
+
+  const exportCsv = (rows) => downloadCsv(`tap-${platform}-results.csv`, [
+    { key: 'name', header: 'Test' },
+    { key: 'suite', header: 'Suite' },
+    { key: 'test_type_label', header: 'Test Type' },
+    { key: 'feature', header: 'Feature' },
+    { key: 'status', header: 'Result' },
+    { key: 'started_at', header: 'Started' },
+    { key: 'duration_ms', header: 'Duration (ms)' },
+    { key: 'message', header: 'Message' },
+  ], rows);
 
   return (
     <Page
@@ -72,14 +91,17 @@ function PlatformReport({ platform, description, icon, emptyTitle, emptyBody, wo
     >
       <DataState state={state}>
         {(s) => {
-          const results = s.results.filter((r) => r.platform === platform);
+          const platformResults = s.results.filter((r) => r.platform === platform);
+          const results = typeFilter === 'all'
+            ? platformResults
+            : platformResults.filter((r) => r.test_type === typeFilter);
           const stat = statOf(results);
           const suites = groupBy(results, 'suite');
           const features = groupBy(results, 'feature');
           const hosts = groupBy(results, 'host');
           const failures = results.filter((r) => ['failed', 'broken'].includes(r.status));
 
-          if (!results.length) {
+          if (!platformResults.length) {
             return (
               <Panel>
                 <EmptyState icon={icon} title={emptyTitle} action={<Button variant="primary" to={workspacePath}>{workspaceLabel}</Button>}>
@@ -100,15 +122,27 @@ function PlatformReport({ platform, description, icon, emptyTitle, emptyBody, wo
                   hint={s.finished_at ? `Run finished ${timeAgo(s.finished_at)}` : undefined} />
               </StatGrid>
 
-              <Tabs
-                active={tab}
-                onChange={setTab}
-                tabs={[
-                  { id: 'overview', label: 'Overview', icon: PieChart },
-                  { id: 'results', label: 'Results', icon: FileText, count: results.length },
-                  { id: 'failures', label: 'Failures', icon: AlertOctagon, count: failures.length },
-                ]}
-              />
+              <div className="tap-report-toolbar">
+                <Tabs
+                  active={tab}
+                  onChange={setTab}
+                  tabs={[
+                    { id: 'overview', label: 'Overview', icon: PieChart },
+                    { id: 'results', label: 'Results', icon: FileText, count: results.length },
+                    { id: 'failures', label: 'Failures', icon: AlertOctagon, count: failures.length },
+                  ]}
+                />
+                <div className="tap-report-tools">
+                  <TestTypeFilter value={typeFilter} counts={typeCounts(platformResults)} onChange={setTypeFilter} />
+                  <Button icon={Download} onClick={() => exportCsv(results)} disabled={!results.length}>Export CSV</Button>
+                </div>
+              </div>
+
+              {typeFilter !== 'all' && (
+                <p className="tap-hint">
+                  Showing {results.length} of {platformResults.length} result(s) for <TestTypeBadge type={typeFilter} />.
+                </p>
+              )}
 
               {tab === 'overview' && (
                 <>
@@ -120,8 +154,21 @@ function PlatformReport({ platform, description, icon, emptyTitle, emptyBody, wo
                   </Grid>
                   <Grid cols={2}>
                     <Panel title="By suite" icon={FileBarChart} flush><DataTable rowKey="name" rows={suites} columns={GROUP_COLUMNS('Suite')} /></Panel>
+                    <Panel title="By test type" icon={Tag} flush>
+                      <DataTable
+                        rowKey="name"
+                        rows={groupBy(results, 'test_type_label')}
+                        empty={<EmptyState compact title="No results to group" />}
+                        columns={GROUP_COLUMNS('Test type')}
+                      />
+                    </Panel>
+                  </Grid>
+                  <Grid cols={2}>
                     <Panel title={platform === 'mobile' ? 'By execution host' : 'By feature'} icon={platform === 'mobile' ? Server : FileBarChart} flush>
                       <DataTable rowKey="name" rows={platform === 'mobile' ? hosts : features} columns={GROUP_COLUMNS(platform === 'mobile' ? 'Host' : 'Feature')} />
+                    </Panel>
+                    <Panel title="Test type mix" icon={BarChart3}>
+                      <OutcomeBars data={groupBy(results, 'test_type_label').map((g) => ({ ...g, label: g.name }))} />
                     </Panel>
                   </Grid>
                 </>
@@ -139,6 +186,7 @@ function PlatformReport({ platform, description, icon, emptyTitle, emptyBody, wo
                     empty={<EmptyState compact icon={CheckCircle2} title="No failures in this run" />}
                     columns={[
                       { key: 'name', header: 'Test', render: (r) => <><div className="tap-cell-main">{r.name}</div><div className="tap-cell-sub">{humanize(r.suite)}</div></> },
+                      { key: 'test_type', header: 'Test Type', render: (r) => <TestTypeBadge type={r.test_type} label={r.test_type_label} /> },
                       { key: 'failed_step', header: 'Failed step', render: (r) => r.failed_step || '—' },
                       { key: 'cause', header: 'Likely cause', render: (r) => <Pill tone="danger">{r.failure?.label}</Pill> },
                       { key: 'message', header: 'Message', render: (r) => <span className="tap-cell-sub tap-clamp">{r.message}</span> },

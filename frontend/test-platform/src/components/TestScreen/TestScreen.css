@@ -1,0 +1,36 @@
+
+/* Test-type chips (Run Tests → Test Types). */
+.type-chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.type-chip {
+    padding: 4px 10px;
+    border: 1px solid #334155;
+    border-radius: 999px;
+    background: #0f172a;
+    color: #cbd5e1;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.type-chip:hover:not(:disabled) { border-color: var(--chip, #64748b); color: #e2e8f0; }
+
+.type-chip.is-active {
+    border-color: var(--chip, #2563eb);
+    background: color-mix(in srgb, var(--chip, #2563eb) 24%, #0f172a);
+    color: #fff;
+}
+
+.type-chip:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.input-hint {
+    display: block;
+    margin-top: 6px;
+    font-size: 11.5px;
+    color: #94a3b8;
+}

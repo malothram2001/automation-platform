@@ -2,8 +2,10 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import PlainTextResponse
 
 from .models import ImportRequest, TestCaseInput
+from . import test_types as tt
 from .service import (
-    build_matrix, build_queue, get_flow, list_all_cases, list_flows, list_runs, list_suites,
+    build_matrix, build_queue, get_flow, list_all_cases, list_flows, list_modules, list_runs, list_suites,
+    resolve_run_selection, type_counts,
 )
 from .store import CSV_TEMPLATE, create_case, delete_case, import_cases, update_case
 
@@ -12,11 +14,31 @@ router = APIRouter()
 # Handlers are sync on purpose: they read files from disk, so FastAPI runs
 # them in its threadpool instead of blocking the event loop.
 
+@router.get("/test-types")
+def test_type_catalogue():
+    """The configurable test-type list every screen and filter reads."""
+    types = tt.list_test_types()
+    known = {t["id"] for t in types}
+    # Types only present on existing cases (e.g. imported long ago) stay selectable.
+    in_use = type_counts(list_all_cases())
+    custom = [
+        {"id": key, "label": tt.label_for(key), "short": tt.short_label(key), "color": "#64748b",
+         "aliases": [], "description": "In use by existing test cases", "custom": True}
+        for key in sorted(in_use) if key not in known
+    ]
+    return {
+        "types": [{**t, "count": in_use.get(t["id"], 0)} for t in types]
+                 + [{**t, "count": in_use.get(t["id"], 0)} for t in custom],
+        "default": tt.default_test_type(),
+    }
+
+
 @router.get("/cases")
 def test_cases(
     suite: str | None = Query(None),
     platform: str | None = Query(None, pattern="^(mobile|web)$"),
     source: str | None = Query(None, pattern="^(automated|manual)$"),
+    test_type: str | None = Query(None, description="Comma-separated test type ids"),
 ):
     cases = list_all_cases()
     if suite:
@@ -25,7 +47,10 @@ def test_cases(
         cases = [c for c in cases if c["platform"] == platform]
     if source:
         cases = [c for c in cases if c["source"] == source]
-    return {"total": len(cases), "cases": cases}
+    if test_type:
+        wanted = {t.strip() for t in test_type.split(",") if t.strip()}
+        cases = [c for c in cases if c["test_type"] in wanted]
+    return {"total": len(cases), "cases": cases, "type_counts": type_counts(cases)}
 
 
 @router.post("/cases", status_code=201)
@@ -69,6 +94,21 @@ def test_suites():
 @router.get("/matrix")
 def execution_matrix():
     return build_matrix()
+
+@router.get("/modules")
+def runnable_modules(
+    platform: str = Query("mobile", pattern="^(mobile|web)$"),
+    variant: str | None = Query(None),
+):
+    """Modules a run can select, discovered from the test files on disk."""
+    return list_modules(platform, variant)
+
+@router.post("/run-selection")
+def run_selection(payload: dict):
+    """Preview what a run would execute: module paths + test types → test cases."""
+    paths = [p for p in (payload.get("paths") or []) if isinstance(p, str)]
+    types = [t for t in (payload.get("test_types") or []) if isinstance(t, str)]
+    return resolve_run_selection(paths, types)
 
 @router.get("/runs")
 def test_runs():

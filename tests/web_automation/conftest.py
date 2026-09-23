@@ -7,6 +7,7 @@ Tests are written as plain `def` (not async def).
 """
 
 import json
+import os
 import pytest
 import allure
 from pathlib import Path
@@ -19,13 +20,30 @@ _browser = None
 _context = None
 _page    = None
 
+# Run configuration, set by the platform (Web Testing → Execution Configuration).
+# Defaults keep a plain `pytest` run headed on bundled Chromium.
+BROWSER  = os.getenv("WEB_BROWSER", "chromium").lower()
+HEADLESS = os.getenv("WEB_HEADLESS", "").strip().lower() in ("1", "true", "yes")
+SLOW_MO  = int(os.getenv("WEB_SLOW_MO", "0" if HEADLESS else "200"))
+
+# Chrome and Edge run through the copy installed on the host (a Playwright channel).
+_CHANNELS = {"chrome": "chrome", "msedge": "msedge"}
+
+
+def _launch(pw):
+    if BROWSER in _CHANNELS:
+        return pw.chromium.launch(headless=HEADLESS, slow_mo=SLOW_MO, channel=_CHANNELS[BROWSER])
+    engine = {"firefox": pw.firefox, "webkit": pw.webkit}.get(BROWSER, pw.chromium)
+    return engine.launch(headless=HEADLESS, slow_mo=SLOW_MO)
+
 
 @pytest.fixture(scope="session", autouse=True)
 def launch_browser():
     global _pw, _browser, _context, _page
 
     _pw = sync_playwright().start()
-    _browser = _pw.chromium.launch(headless=False, slow_mo=200)
+    print(f"[web] launching {BROWSER} (headless={HEADLESS}, slow_mo={SLOW_MO}ms)")
+    _browser = _launch(_pw)
     _context = _browser.new_context(
         viewport={"width": 1440, "height": 900},
         permissions=["geolocation"],

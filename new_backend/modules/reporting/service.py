@@ -15,6 +15,8 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+from new_backend.modules.test_management import test_types as tt
+
 PROJECT_ROOT       = Path(__file__).resolve().parents[3]
 ALLURE_RESULTS_DIR = PROJECT_ROOT / "allure-results"
 ALLURE_REPORT_DIR  = PROJECT_ROOT / "allure-report"
@@ -75,15 +77,21 @@ def classify_failure(message: str | None) -> dict:
 
 # ── Loaders ──────────────────────────────────────────────────────────────────
 
-def load_latest_results() -> list[dict]:
-    """Normalised results of the latest run, newest first."""
+def load_results_from(results_dir: Path) -> list[dict]:
+    """Normalised results of one allure-results folder, newest first.
+
+    Platform runs write into var/runs/<run_id>/allure-results, so a run can be
+    read back on its own; the repository-level folder holds the latest run.
+    """
     results = []
-    for path in ALLURE_RESULTS_DIR.glob("*-result.json"):
+    for path in Path(results_dir).glob("*-result.json"):
         raw = _read_json(path, None)
         if not isinstance(raw, dict):
             continue
 
         labels = {l.get("name"): l.get("value") for l in raw.get("labels", []) if l.get("name")}
+        tags = [l.get("value") for l in raw.get("labels", []) if l.get("name") == "tag" and l.get("value")]
+        declared_type = tt.from_metadata(tags=tags, labels=labels)
         details = raw.get("statusDetails") or {}
         steps = raw.get("steps") or []
         failed_step = next((s.get("name") for s in steps if s.get("status") in FAIL_STATUSES), None)
@@ -111,9 +119,33 @@ def load_latest_results() -> list[dict]:
             "story":       labels.get("story"),
             "severity":    labels.get("severity", "normal"),
             "host":        labels.get("host"),
+            "tags":        tags,
+            "test_type":   declared_type,            # filled in from the inventory below
+            "test_type_label": tt.label_for(declared_type),
         })
 
     results.sort(key=lambda r: r["start_ms"] or 0, reverse=True)
+    return results
+
+
+def load_latest_results() -> list[dict]:
+    """Results of the most recently published run (allure-results/)."""
+    return load_results_from(ALLURE_RESULTS_DIR)
+
+
+def attach_test_types(results: list[dict]) -> list[dict]:
+    """Give every result a test type: the one it declared, else the one its test
+    case carries in the inventory, else the configured default."""
+    if any(not r.get("test_type") for r in results):
+        # Local import: test_management imports this module, so this would be a cycle at import time.
+        from new_backend.modules.test_management.service import discover_test_cases
+
+        by_full_name = {c["full_name"]: c["test_type"] for c in discover_test_cases()}
+        for result in results:
+            if not result.get("test_type"):
+                result["test_type"] = by_full_name.get(result["full_name"]) or tt.default_test_type()
+    for result in results:
+        result["test_type_label"] = tt.label_for(result["test_type"])
     return results
 
 
@@ -187,6 +219,14 @@ def _statistic(results: list[dict]) -> dict:
     return stat
 
 
+def _group_test_types(results: list[dict]) -> list[dict]:
+    """Outcome per test type, labelled from the configurable catalogue."""
+    rows = []
+    for row in _group(results, "test_type"):
+        rows.append({**row, "id": row["name"], "name": tt.label_for(row["name"]), "short": tt.short_label(row["name"])})
+    return sorted(rows, key=lambda r: -r["total"])
+
+
 def _group(results: list[dict], key: str) -> list[dict]:
     groups = defaultdict(list)
     for r in results:
@@ -204,7 +244,7 @@ def _group(results: list[dict], key: str) -> list[dict]:
 
 
 def build_summary() -> dict:
-    results = load_latest_results()
+    results = attach_test_types(load_latest_results())
 
     if results:
         stat = _statistic(results)
@@ -233,6 +273,7 @@ def build_summary() -> dict:
         "by_suite":    _group(results, "suite"),
         "by_feature":  _group(results, "feature"),
         "by_severity": _group(results, "severity"),
+        "by_test_type": _group_test_types(results),
         "report_available": (ALLURE_REPORT_DIR / "index.html").exists(),
     }
 

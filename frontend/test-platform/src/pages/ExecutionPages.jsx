@@ -1,19 +1,21 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import useWebSocket, { ReadyState } from 'react-use-websocket';
 import clsx from 'clsx';
 import {
   Activity, CalendarClock, CheckCircle2, Circle, CircleDashed, Clock, ExternalLink, FileCode2, Grid3x3, ListOrdered,
-  Loader2, MonitorSmartphone, Pause, Play, Radio, Square, Target, Terminal, Trash2, XCircle,
+  Loader2, MonitorSmartphone, Pause, Play, Radio, Square, Tag, Target, Terminal, Trash2, XCircle,
 } from 'lucide-react';
 import {
   Button, DataState, DataTable, EmptyState, Grid, Page, Panel, Pill, ProgressBar, RefreshButton, StatCard, StatGrid,
   StatusBadge, Tabs,
 } from '../components/ui/ui';
+import { TestTypeList } from '../components/ui/TestTypes';
 import ModuleScaffold from './common/ModuleScaffold';
 import useApi from '../hooks/useApi';
-import { WS_URL, apiFetch } from '../config/api';
+import { API_URL, WS_URL, apiFetch } from '../config/api';
 import { useWorkspace } from '../context/workspaceContext';
-import { formatDateTime, formatDuration, pct, timeAgo } from '../utils/format';
+import { formatDateTime, formatDuration, humanize, pct, timeAgo } from '../utils/format';
 
 /* ─── Execution Matrix ───────────────────────────────────────────────────── */
 
@@ -27,6 +29,7 @@ const CELL_META = {
 
 export function ExecutionMatrixPage() {
   const state = useApi('/test-management/matrix');
+  const runs = useApi('/api/v1/executions?limit=25', { interval: 10000 });
   const { variant } = useWorkspace();
 
   return (
@@ -58,6 +61,14 @@ export function ExecutionMatrixPage() {
                           <ProgressBar value={v.coverage_pct} tone={v.coverage_pct >= 80 ? 'success' : 'warn'} label={`${v.label} coverage`} />
                           <span>{pct(v.coverage_pct)}</span>
                         </div>
+                        <TestTypeList
+                          counts={v.modules.reduce((acc, cell) => {
+                            Object.entries(cell.type_counts || {}).forEach(([id, n]) => { acc[id] = (acc[id] || 0) + n; });
+                            return acc;
+                          }, {})}
+                          max={4}
+                          empty="No test cases yet"
+                        />
                       </div>
                       <div className="tap-matrix-cells">
                         {v.modules.map((cell) => {
@@ -72,6 +83,11 @@ export function ExecutionMatrixPage() {
                               <div className="tap-matrix-cell-sub">
                                 {cell.exists ? `${cell.test_count} test${cell.test_count === 1 ? '' : 's'} · ${meta.label}` : meta.label}
                               </div>
+                              {cell.exists && (
+                                <div className="tap-matrix-cell-types">
+                                  <TestTypeList counts={cell.type_counts} max={2} empty="" />
+                                </div>
+                              )}
                             </div>
                           );
                         })}
@@ -79,6 +95,48 @@ export function ExecutionMatrixPage() {
                     </div>
                   ))}
                 </div>
+              </Panel>
+
+              <Panel title="Executions" icon={Radio} flush
+                subtitle="Every run this backend has started, whatever its test type"
+                actions={<Button variant="ghost" to="/execution/live">Live Execution</Button>}>
+                <DataState state={runs} rows={2}>
+                  {(r) => (
+                    <DataTable
+                      rowKey="run_id"
+                      rows={r.runs}
+                      empty={<EmptyState compact icon={Radio} title="No run started yet">
+                        Start one from <Button variant="ghost" to="/automation/web">Web Testing</Button> or
+                        <Button variant="ghost" to="/automation/mobile">Mobile Testing</Button>.
+                      </EmptyState>}
+                      columns={[
+                        { key: 'run_id', header: 'Run', render: (run) => <span className="tap-mono">{run.run_id}</span> },
+                        { key: 'test_type', header: 'Type', render: (run) => humanize(run.test_type) },
+                        {
+                          key: 'target', header: 'Application',
+                          render: (run) => (
+                            <>
+                              <div className="tap-cell-main">{run.application}</div>
+                              <div className="tap-cell-sub">
+                                {[run.role, run.browser, run.device?.udid].filter(Boolean).join(' · ') || '—'}
+                              </div>
+                            </>
+                          ),
+                        },
+                        { key: 'modules', header: 'Modules', align: 'right', render: (run) => run.modules.length },
+                        {
+                          key: 'outcome', header: 'Passed / Failed', align: 'right',
+                          render: (run) => (run.result
+                            ? `${run.result.passed} / ${run.result.failed}`
+                            : '—'),
+                        },
+                        { key: 'status', header: 'Status', render: (run) => <StatusBadge status={run.status.toLowerCase()} label={humanize(run.status)} /> },
+                        { key: 'duration', header: 'Duration', align: 'right', render: (run) => (run.duration ? formatDuration(run.duration * 1000) : '—') },
+                        { key: 'started', header: 'Started', render: (run) => (run.started_at ? timeAgo(run.started_at) : '—') },
+                      ]}
+                    />
+                  )}
+                </DataState>
               </Panel>
 
               <Panel title="Missing test files" icon={FileCode2} flush subtitle="Planned modules that have no pytest file yet">
@@ -142,9 +200,23 @@ function useNow(running) {
   return now;
 }
 
+/** ws://…/ws/executions/<run_id> for one run; the legacy stream while no run is selected. */
+function socketUrl(runId) {
+  if (!runId) return WS_URL;
+  return `${API_URL.replace(/^http/, 'ws')}/ws/executions/${encodeURIComponent(runId)}`;
+}
+
 export function LiveExecutionPage() {
+  const [params] = useSearchParams();
+  const executions = useApi('/api/v1/executions?active=true', { interval: 5000 });
   const queue = useApi('/test-management/queue', { interval: 5000 });
   const devices = useApi('/platform/devices', { interval: 15000 });
+
+  // The run to follow: the one the Automation screen just started, else the
+  // newest active run the backend reports.
+  const requestedRun = params.get('run');
+  const runId = requestedRun || executions.data?.runs?.[0]?.run_id || null;
+  const execution = executions.data?.runs?.find((r) => r.run_id === runId) || null;
 
   const [modules, setModules] = useState([]);
   const [logs, setLogs] = useState([]);
@@ -161,12 +233,83 @@ export function LiveExecutionPage() {
   const push = (message, status = 'INFO') =>
     setLogs((prev) => [...prev.slice(-MAX_LOG_LINES + 1), { time: now(), message, status: String(status).toUpperCase() }]);
 
-  const { readyState } = useWebSocket(WS_URL, {
+  const applyModules = (list) =>
+    setModules((list || []).map((m) => ({
+      name: m.name, path: m.path, status: m.status || 'pending', startedAt: null, duration: null,
+    })));
+
+  /** One event of one run (/ws/executions/{run_id}). */
+  const handleRunEvent = (event) => {
+    switch (event.event_type) {
+      case 'SNAPSHOT':
+        applyModules(event.execution?.modules);
+        setLogs((event.logs || []).map((l) => ({
+          time: new Date(l.timestamp).toLocaleTimeString(), message: l.message, status: l.status,
+        })));
+        setPhase(['COMPLETED', 'FAILED', 'CANCELLED'].includes(event.execution?.status) ? 'complete' : 'running');
+        setStartedAt(event.execution?.started_at ? new Date(event.execution.started_at).getTime() : null);
+        setFinishedAt(event.execution?.finished_at ? new Date(event.execution.finished_at).getTime() : null);
+        break;
+      case 'EXECUTION_STARTED':
+        applyModules(event.modules);
+        setPhase('running');
+        setStartedAt((prev) => prev ?? Date.now());
+        break;
+      case 'RESOURCE_ALLOCATED':
+        if (event.modules) applyModules(event.modules);
+        break;
+      case 'MODULE_STARTED':
+      case 'MODULE_COMPLETED':
+      case 'MODULE_FAILED': {
+        const stamp = Date.now();
+        setModules((prev) => prev.map((m) => (m.name === event.module
+          ? {
+            ...m,
+            status: event.status,
+            startedAt: event.status === 'running' ? stamp : m.startedAt,
+            duration: ['completed', 'failed'].includes(event.status) && m.startedAt ? stamp - m.startedAt : m.duration,
+          }
+          : m)));
+        if (event.message) push(`[${event.module}] ${event.message}`, event.status);
+        break;
+      }
+      case 'LOG':
+        if (event.message) push(event.message, event.status);
+        break;
+      case 'STATE_CHANGED':
+        if (['COMPLETED', 'FAILED', 'CANCELLED'].includes(event.state)) {
+          setPhase('complete');
+          setFinishedAt(Date.now());
+        } else if (event.state === 'RUNNING') {
+          setPhase('running');
+          setStartedAt((prev) => prev ?? Date.now());
+        }
+        break;
+      case 'EXECUTION_COMPLETED':
+      case 'EXECUTION_FAILED':
+      case 'EXECUTION_CANCELLED':
+        setPhase('complete');
+        setFinishedAt(Date.now());
+        if (event.report_url) setReportUrl(event.report_url);
+        if (event.error) push(event.error, 'FAILED');
+        break;
+      default:
+        break;
+    }
+  };
+
+  const { readyState } = useWebSocket(socketUrl(runId), {
     shouldReconnect: () => true,
     reconnectInterval: 3000,
     onMessage: (event) => {
       let msg;
       try { msg = JSON.parse(event.data); } catch { return; }
+
+      // Run-scoped events carry event_type + run_id; the legacy stream sends {type, payload}.
+      if (msg.event_type) {
+        handleRunEvent(msg);
+        return;
+      }
       const p = msg.payload || {};
       switch (msg.type) {
         case 'RUN_START':
@@ -250,13 +393,17 @@ export function LiveExecutionPage() {
   const stopRun = async () => {
     setStopping(true);
     try {
-      await apiFetch('/test/stop-test', { method: 'POST' });
+      // Stop this run when one is being followed; otherwise fall back to the
+      // legacy endpoint, which also cancels any /api/v1 run in flight.
+      await apiFetch(runId ? `/api/v1/executions/${encodeURIComponent(runId)}/stop` : '/test/stop-test',
+        { method: 'POST' });
       push('Stop requested by the user', 'INFO');
     } catch (err) {
       push(`Could not stop the run: ${err.message}`, 'FAILED');
     } finally {
       setStopping(false);
       queue.reload();
+      executions.reload();
     }
   };
 
@@ -267,8 +414,13 @@ export function LiveExecutionPage() {
 
   return (
     <Page
-      description="Execute and monitor the current run in real time — module progress, the runner’s log stream and the devices in use."
-      meta={running && <Pill tone="danger"><span className="tap-live-dot" aria-hidden />LIVE</Pill>}
+      description="Execute and monitor one run in real time — module progress, the runner’s log stream and the devices in use."
+      meta={
+        <>
+          {runId && <Pill tone="primary">{runId}</Pill>}
+          {running && <Pill tone="danger"><span className="tap-live-dot" aria-hidden />LIVE</Pill>}
+        </>
+      }
       actions={
         <>
           <StatusBadge status={socket[0]} label={socket[1]} />
@@ -301,8 +453,21 @@ export function LiveExecutionPage() {
           </div>
           <div>
             <span className="tap-live-label"><Radio size={13} aria-hidden /> Run</span>
-            <strong>{activeRun?.app_name || (running ? 'In progress' : 'Idle')}</strong>
-            <span className="tap-cell-sub">{activeRun?.variant_label || activeRun?.app_variant || 'Serial execution (one module at a time)'}</span>
+            <strong>{execution ? `${execution.test_type} · ${execution.application}` : activeRun?.app_name || (running ? 'In progress' : 'Idle')}</strong>
+            <span className="tap-cell-sub">
+              {execution
+                ? [execution.role, execution.browser, execution.device?.udid].filter(Boolean).join(' · ') || execution.status
+                : activeRun?.variant_label || activeRun?.app_variant || 'Serial execution (one module at a time)'}
+            </span>
+          </div>
+          <div>
+            <span className="tap-live-label"><Tag size={13} aria-hidden /> Test types</span>
+            <strong className="tap-live-types">
+              <TestTypeList types={activeRun?.test_types || []} empty={running ? 'All test types' : '—'} />
+            </strong>
+            <span className="tap-cell-sub">
+              {activeRun?.test_types?.length ? 'Only these types are executing' : 'Every test case in the selected modules'}
+            </span>
           </div>
         </div>
       </div>
@@ -428,6 +593,7 @@ export function ScheduledRunsPage() {
       columns={[
         { key: 'name', header: 'Schedule' },
         { key: 'suite', header: 'Suite / variant' },
+        { key: 'test_types', header: 'Test Types' },
         { key: 'cron', header: 'Cron' },
         { key: 'next', header: 'Next run' },
         { key: 'last', header: 'Last result' },
@@ -436,7 +602,7 @@ export function ScheduledRunsPage() {
       emptyTitle="No schedules yet"
       emptyBody="The backend doesn’t have a scheduler yet, so runs start from Mobile Testing or Run Tests. Until one exists, trigger the runner from CI on a cron (see Pipelines)."
       capabilities={[
-        'Cron-based schedules per suite and app variant',
+        'Cron-based schedules per suite, app variant and test type (nightly regression, hourly smoke)',
         'Pick the APK source: latest Google Drive build or a stored APK',
         'Skip a slot automatically if a run is already in progress',
         'Post the results to Slack and flag failures in Jira',
@@ -444,7 +610,7 @@ export function ScheduledRunsPage() {
       setup={`# Interim: trigger a nightly run from any CI cron
 curl -X POST http://localhost:8000/test/start-test-existing \\
   -H "Content-Type: application/json" \\
-  -d '{"apk_name": "farmer_app.apk"}'`}
+  -d '{"apk_name": "farmer_app.apk", "test_types": ["smoke", "regression"]}'`}
     />
   );
 }

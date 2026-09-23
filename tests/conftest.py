@@ -398,24 +398,40 @@ def pytest_runtest_setup(item):
 # ── Driver fixture ────────────────────────────────────────────────────────────
 @pytest.fixture(scope="session")
 def driver(request):
-    apk_path = request.config.getoption("--apk")
+    """Appium session built from the execution configuration.
+
+    The platform (MobileEngine) passes the device, APK and Appium server for
+    this run as environment variables; the --apk option still works for a
+    standalone `pytest` run. Nothing about the device is hard-coded here.
+    """
+    apk_path = request.config.getoption("--apk") or os.getenv("APK_PATH")
     if not apk_path:
-        pytest.fail("No APK path provided!")
+        pytest.fail("No APK provided. Pass --apk=<path> or set APK_PATH.")
     if not os.path.exists(apk_path):
         pytest.fail(f"APK file not found at: {apk_path}")
 
+    udid             = os.getenv("DEVICE_UDID") or os.getenv("ANDROID_SERIAL")
+    device_name      = os.getenv("DEVICE_NAME") or udid or "AndroidDevice"
+    platform_version = os.getenv("DEVICE_PLATFORM_VERSION")
+    server_url       = os.getenv("APPIUM_URL", "http://127.0.0.1:4723")
+
     print(f"Initializing Appium with APK: {apk_path}")
+    print(f"Device: {device_name}" + (f" ({udid})" if udid else "") + f" via {server_url}")
     options = UiAutomator2Options()
     options.platform_name = "Android"
-    options.device_name   = "AndroidDevice"
+    options.device_name   = device_name
     options.app           = apk_path
+    if udid:
+        options.udid = udid                      # run on the device the platform allocated
+    if platform_version:
+        options.platform_version = platform_version
     options.set_capability("appium:ignoreHiddenApiPolicyError", True)
     options.set_capability("appium:uiautomator2ServerLaunchTimeout", 60000)
     options.set_capability("appium:adbExecTimeout",                  50000)
     options.set_capability("appium:newCommandTimeout",                300)
     options.set_capability("appium:autoGrantPermissions",             False)
 
-    drv = webdriver.Remote("http://127.0.0.1:4723", options=options)
+    drv = webdriver.Remote(server_url, options=options)
     try:
         drv.get_log("logcat")
     except Exception:

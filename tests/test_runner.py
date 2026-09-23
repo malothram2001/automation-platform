@@ -62,6 +62,23 @@ def _ensure_clean_allure_dirs(project_root: str) -> None:
         shutil.rmtree(report_path, ignore_errors=True)
 
 
+def write_allure_environment(project_root: str, meta: Optional[Dict[str, str]] = None) -> None:
+    """Write allure-results/environment.properties so the report records how the run
+    was configured (test types, environment, browser/device). Called after pytest has
+    finished, because --clean-alluredir wipes the folder when pytest starts."""
+    if not meta:
+        return
+    results_dir = os.path.join(project_root, RESULTS_DIR)
+    try:
+        os.makedirs(results_dir, exist_ok=True)
+        with open(os.path.join(results_dir, "environment.properties"), "w", encoding="utf-8") as fh:
+            for key, value in meta.items():
+                if value not in (None, ""):
+                    fh.write(f"{key}={value}\n")
+    except OSError as exc:
+        send_log(f"Could not write Allure environment file: {exc}", "WARNING")
+
+
 def generate_report(project_root: Optional[str] = None) -> None:
     """Generates and opens Allure HTML report."""
     if project_root is None:
@@ -218,7 +235,8 @@ def run_tests_and_get_suggestions(
     app_name: Optional[str] = None,
     app_version: Optional[str] = None,
     developer_name: Optional[str] = None,
-    run_id=None 
+    run_id=None,
+    run_meta: Optional[Dict[str, str]] = None,
 ) -> None:
     """
     Runs all tests in a single session to keep the app open,
@@ -267,7 +285,9 @@ def run_tests_and_get_suggestions(
         path = t.get("path")
         name = t.get("name", path)
         if path and os.path.exists(os.path.join(project_root, path)):
-            valid_paths.append(path)
+            # node_ids (set when test types were selected) run only the matching test
+            # cases of that file; without them the whole file runs.
+            valid_paths.extend(t.get("node_ids") or [path])
             path_to_name_map[path] = name
             send_module_status(name, "pending", "Waiting in queue...")
         else:
@@ -312,6 +332,7 @@ def run_tests_and_get_suggestions(
         else:
             send_log("Suite execution finished with errors.", "FAILED")
 
+        write_allure_environment(project_root, run_meta)
         generate_report(project_root)
 
         try:
@@ -328,7 +349,8 @@ def run_tests_and_get_suggestions(
 def run_pytest_streaming_with_tracking(
     pytest_args: list,
     path_mapping: dict,
-    clean_allure: bool
+    clean_allure: bool,
+    extra_env: Optional[Dict[str, str]] = None,
 ) -> bool:
     """
     Execute pytest and parse lines for UI status updates.
@@ -347,6 +369,9 @@ def run_pytest_streaming_with_tracking(
         "PYTHONUTF8": "1",
         "PYTHONUNBUFFERED": "1",
     })
+    # Run configuration chosen in the UI (e.g. WEB_BROWSER / WEB_HEADLESS).
+    if extra_env:
+        env.update({k: str(v) for k, v in extra_env.items() if v is not None})
 
     cmd = [
         sys.executable, "-u", "-m", "pytest", "-p", "allure_pytest",

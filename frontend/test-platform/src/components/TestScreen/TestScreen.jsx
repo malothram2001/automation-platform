@@ -7,6 +7,7 @@ import UIScreenshotIssues from '../UIScreenshotIssues/UIScreenshotIssues';
 import IssuePanel from '../IssuePanel/IssuePanel';
 import NetworkConfigPanel from '../NetworkConfig/NetworkConfig'
 import '../../App.css';
+import useTestTypes from '../../hooks/useTestTypes';
 
 const WS_URL = 'ws://localhost:8000/ws/test-status';
 const API_URL = 'http://localhost:8000';
@@ -349,6 +350,8 @@ function TestScreen({ onHistoryUpdate }) {
     const [selectedAppKey, setSelectedAppKey] = useState(() => loadState('selectedAppKey', 'FARMER'));
     const [existingApks, setExistingApks] = useState([]);
     const [selectedApk, setSelectedApk] = useState(() => loadState('selectedApk', ''));
+    const testTypes = useTestTypes();
+    const [selectedTypes, setSelectedTypes] = useState(() => loadState('selectedTypes', []));
     const [hasOpenedReport, setHasOpenedReport] = useState(false);
     const [networkConfig, setNetworkConfig] = useState(null);
     const [showNewTestButton, setShowNewTestButton] = useState(false);
@@ -370,8 +373,9 @@ function TestScreen({ onHistoryUpdate }) {
         sessionStorage.setItem('selectedAppKey', JSON.stringify(selectedAppKey));
         sessionStorage.setItem('modules', JSON.stringify(modules));
         sessionStorage.setItem('selectedApk', JSON.stringify(selectedApk));
+        sessionStorage.setItem('selectedTypes', JSON.stringify(selectedTypes));
         sessionStorage.setItem('logs', JSON.stringify(logs.slice(-200)));
-    }, [apkUrl, isRunning, selectedAppKey, modules, selectedApk, logs]);
+    }, [apkUrl, isRunning, selectedAppKey, modules, selectedApk, selectedTypes, logs]);
 
     const getConsoleStatus = () => {
         if (isRunning) return 'running';
@@ -496,7 +500,12 @@ function TestScreen({ onHistoryUpdate }) {
             //     }
             // }
 
-            const payload = { tests_to_run: testsToRun, app_type: APP_VARIANTS[selectedAppKey].id, run_id: runId };
+            const payload = {
+                tests_to_run: testsToRun,
+                app_type: APP_VARIANTS[selectedAppKey].id,
+                run_id: runId,
+                test_types: selectedTypes,          // empty = every test type
+            };
             const endpoint = selectedApk ? '/test/start-test-existing' : '/test/start-test';
             const body = selectedApk ? { ...payload, apk_name: selectedApk } : { ...payload, url: apkUrl };
 
@@ -575,6 +584,7 @@ function TestScreen({ onHistoryUpdate }) {
         [
             'apkUrl',
             'selectedApk',
+            'selectedTypes',
             'logs',
             'modules',
             'isRunning',
@@ -711,6 +721,35 @@ function TestScreen({ onHistoryUpdate }) {
                             <input type="text" placeholder="https://drive.google.com/..." value={apkUrl}
                                 onChange={e => { setApkUrl(e.target.value); if (e.target.value) setSelectedApk(''); }}
                                 className="text-input" disabled={isRunning || !!selectedApk} />
+                        </div>
+
+                        <div className="input-group mt-2">
+                            <label className="input-label">Test Types</label>
+                            <div className="type-chip-row">
+                                {(testTypes.types || []).map(type => {
+                                    const active = selectedTypes.includes(type.id);
+                                    return (
+                                        <button
+                                            key={type.id}
+                                            type="button"
+                                            disabled={isRunning}
+                                            className={`type-chip ${active ? 'is-active' : ''}`}
+                                            style={{ '--chip': type.color }}
+                                            title={type.description}
+                                            onClick={() => setSelectedTypes(active
+                                                ? selectedTypes.filter(t => t !== type.id)
+                                                : [...selectedTypes, type.id])}
+                                        >
+                                            {type.short}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                            <span className="input-hint">
+                                {selectedTypes.length
+                                    ? 'Only test cases of the selected types run.'
+                                    : 'No type selected — every test case in the selected modules runs.'}
+                            </span>
                         </div>
 
                         <div className="input-group mt-2">

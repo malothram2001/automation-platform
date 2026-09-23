@@ -1,0 +1,155 @@
+/* Test-type chips, picker and filter (see TestTypes.jsx). */
+
+.tap-type-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--type-color, #64748b) 28%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--type-color, #64748b) 10%, #fff);
+  color: color-mix(in srgb, var(--type-color, #64748b) 80%, #0f172a);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.tap-type-badge.is-sm { font-size: 11px; padding: 1px 8px 1px 6px; }
+
+.tap-type-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--type-color, #64748b);
+  flex-shrink: 0;
+}
+
+.tap-type-list {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+/* ── Picker ──────────────────────────────────────────────────────────────── */
+.tap-type-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 8px;
+}
+
+.tap-type-option {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 11px 13px;
+  border: 1px solid var(--tap-border);
+  border-radius: var(--tap-radius);
+  background: var(--tap-surface);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+
+.tap-type-option:hover {
+  border-color: color-mix(in srgb, var(--type-color, #2563eb) 35%, var(--tap-border));
+  box-shadow: 0 1px 6px rgba(15, 23, 42, 0.06);
+}
+
+.tap-type-option.is-checked {
+  border-color: color-mix(in srgb, var(--type-color, #2563eb) 45%, transparent);
+  background: color-mix(in srgb, var(--type-color, #2563eb) 8%, #fff);
+}
+
+/* Coloured tile carrying the type's icon. */
+.tap-type-icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  color: #fff;
+  background: var(--type-color, #2563eb);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--type-color, #2563eb) 35%, transparent);
+  flex-shrink: 0;
+}
+
+.tap-type-option.is-checked .tap-type-icon {
+  box-shadow: 0 3px 10px color-mix(in srgb, var(--type-color, #2563eb) 45%, transparent);
+}
+
+.tap-type-option.is-disabled { opacity: 0.55; cursor: not-allowed; }
+
+.tap-type-option input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.tap-type-check {
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  border: 1.5px solid var(--tap-border-strong);
+  border-radius: 5px;
+  background: var(--tap-surface);
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.tap-type-option.is-checked .tap-type-check {
+  border-color: var(--type-color, #2563eb);
+  background: var(--type-color, #2563eb);
+}
+
+.tap-type-option input:focus-visible + .tap-type-check {
+  outline: 2px solid var(--tap-primary);
+  outline-offset: 2px;
+}
+
+.tap-type-option-body { min-width: 0; }
+
+.tap-type-option-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--tap-text);
+}
+
+.tap-type-option-count {
+  display: block;
+  font-size: 11.5px;
+  color: var(--tap-text-3);
+}
+
+.tap-type-picker-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.tap-link-btn {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--tap-primary);
+  cursor: pointer;
+}
+
+.tap-link-btn:hover { text-decoration: underline; }
+
+/* ── Filter ──────────────────────────────────────────────────────────────── */
+.tap-type-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--tap-text-3);
+}
+
+.tap-type-filter .tap-select { min-width: 170px; }

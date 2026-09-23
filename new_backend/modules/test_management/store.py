@@ -13,6 +13,7 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
+from . import test_types as tt
 from .models import ImportRequest, TestCaseInput
 
 STORE_PATH = Path(__file__).resolve().parents[2] / "data" / "test_cases.json"
@@ -44,8 +45,6 @@ ALIASES = {
                           "manual": "Manual", "no": "Manual", "false": "Manual",
                           "not automated": "Not Automated", "pending": "Not Automated"},
     "status": {"active": "Active", "draft": "Draft", "deprecated": "Deprecated", "obsolete": "Deprecated"},
-    "test_type": {"functional": "Functional", "negative": "Negative", "regression": "Regression",
-                  "smoke": "Smoke", "integration": "Integration", "usability": "Usability"},
 }
 
 
@@ -80,7 +79,15 @@ def _next_id(cases: list[dict]) -> str:
 
 
 def _normalise(field: str, value: str) -> str:
+    if field == "test_type":
+        return tt.normalise(value) or tt.default_test_type()
     return ALIASES.get(field, {}).get(str(value).strip().lower(), value)
+
+
+def _with_type(payload: TestCaseInput) -> dict:
+    data = payload.model_dump()
+    data["test_type"] = tt.normalise(data.get("test_type")) or tt.default_test_type()
+    return data
 
 
 def list_manual_cases() -> list[dict]:
@@ -92,7 +99,7 @@ def create_case(payload: TestCaseInput, case_id: str | None = None) -> dict:
         cases = _read()
         record = {
             "id": case_id or _next_id(cases),
-            **payload.model_dump(),
+            **_with_type(payload),
             "source": "manual",
             "created_at": _now(),
             "updated_at": _now(),
@@ -109,7 +116,7 @@ def update_case(case_id: str, payload: TestCaseInput) -> dict | None:
             if case.get("id") == case_id:
                 cases[index] = {
                     **case,
-                    **payload.model_dump(),
+                    **_with_type(payload),
                     "id": case_id,
                     "source": "manual",
                     "updated_at": _now(),
@@ -193,7 +200,7 @@ def import_cases(request: ImportRequest) -> dict:
 
 CSV_TEMPLATE = (
     "ID,Title,Module,Test Type,Priority,Automation,Status,Variant,Tags,Description,Preconditions,Steps,Expected Result\n"
-    "TC-101,Verify user can login with valid credentials,Authentication,Functional,High,Automated,Active,"
+    "TC-101,Verify user can login with valid credentials,Authentication,Smoke Testing,High,Automated,Active,"
     "regular_farmer,\"login,smoke\",Log in with a valid mobile number and password,App installed and on the login screen,"
     "\"1. Open the app; 2. Enter mobile number; 3. Enter password; 4. Tap Login\",User lands on the dashboard\n"
 )

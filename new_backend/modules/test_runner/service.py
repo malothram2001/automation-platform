@@ -28,7 +28,9 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..
 sys.path.insert(0, PROJECT_ROOT)
 from tests.test_runner import (
     stop_current_tests,
-    generate_report
+    generate_report,
+    run_pytest_streaming_with_tracking,
+    write_allure_environment,
 )
 from new_backend.modules.slack.config import APP_VARIANTS, APP_DEVELOPER_MAP
 from .gdrive_loader import download_apk, extract_app_icon, get_apk_info
@@ -481,7 +483,8 @@ async def start_test_existing_flow(request, background_tasks, manager):
         tests_to_run = request.tests_to_run
 
         if tests_to_run:
-            valid   = [t for t in tests_to_run if os.path.isfile(os.path.join(BASE_DIR, t["path"]))]
+            # Test paths are repository-relative (BASE_DIR points at new_backend/).
+            valid   = [t for t in tests_to_run if os.path.isfile(os.path.join(PROJECT_ROOT, t["path"]))]
             invalid = [t for t in tests_to_run if t not in valid]
 
             if invalid:
@@ -497,6 +500,28 @@ async def start_test_existing_flow(request, background_tasks, manager):
         else:
             tests_to_run = variant_tests
 
+        # Narrow the selected modules to the chosen test types (per-case, not per-file).
+        selection = _selection_for([t["path"] for t in tests_to_run], request.test_types)
+        if request.test_types and not selection["targets"]:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"No test case of type {_type_labels(request.test_types)} in the selected module(s). "
+                    "Clear the test-type filter or pick modules that contain those test cases."
+                ),
+            )
+        by_path: dict[str, list[str]] = {}
+        for case in selection["cases"]:
+            by_path.setdefault(case["id"].split("::")[0], []).append(case["id"])
+        if request.test_types:
+            tests_to_run = [
+                {**t, "node_ids": by_path.get(t["path"], [])}
+                for t in tests_to_run if by_path.get(t["path"])
+            ]
+        runs[run_id]["test_types"] = list(request.test_types or [])
+        runs[run_id]["platform"] = "mobile"
+        runs[run_id]["test_case_count"] = selection["case_count"]
+
         if not tests_to_run:
             raise HTTPException(
                 status_code=400,
@@ -507,7 +532,10 @@ async def start_test_existing_flow(request, background_tasks, manager):
             )
 
         await manager.broadcast({"type": "LOG", "payload": {
-            "message": f"Running {len(tests_to_run)} test(s): {[t['name'] for t in tests_to_run]}",
+            "message": (
+                f"Running {selection['case_count']} test case(s) in {len(tests_to_run)} module(s): "
+                f"{[t['name'] for t in tests_to_run]} · test types: {_type_labels(request.test_types)}"
+            ),
             "status": "INFO",
         }})
 
@@ -515,7 +543,16 @@ async def start_test_existing_flow(request, background_tasks, manager):
             run_post_notify,
             run_id=run_id,
             apk_path=apk_path,
-            tests_to_run   = request.tests_to_run,
+            tests_to_run   = tests_to_run,
+            run_meta       = {
+                "Platform": "Mobile (Android)",
+                "TestTypes": _type_labels(request.test_types),
+                "Environment": request.environment or "Not set",
+                "Device": request.device or "Default device",
+                "AppBuild": request.apk_name,
+                "Modules": ", ".join(t["name"] for t in tests_to_run),
+                "TestCases": str(selection["case_count"]),
+            },
             app_name       = info.get("app_name"),
             app_version    = info.get("app_version"),
             # developer_name = info.get("developer_name"),
@@ -533,6 +570,8 @@ async def start_test_existing_flow(request, background_tasks, manager):
             **info,
             "app_variant":  app_variant,
             "tests_to_run": tests_to_run,
+            "test_types":   list(request.test_types or []),
+            "test_case_count": selection["case_count"],
         }
 
     except HTTPException:
@@ -543,7 +582,150 @@ async def start_test_existing_flow(request, background_tasks, manager):
             }})
         raise HTTPException(status_code=400, detail=f"Failed: {str(e)}")
 
+REPORT_URL = "http://localhost:8000/allure-report/index.html"
+
+
+def _selection_for(paths: list[str], test_types: list[str]) -> dict:
+    """Which test cases a run will execute: the selected modules narrowed to the
+    selected test types. Filtering follows the type on each case (test_types.py)."""
+    from new_backend.modules.test_management.service import resolve_run_selection
+
+    return resolve_run_selection(paths, test_types)
+
+
+def _type_labels(test_types: list[str]) -> str:
+    from new_backend.modules.test_management import test_types as tt
+
+    return tt.selection_labels(test_types)
+
+
+async def _run_web_suite(run_id: str, tests: list[dict], options: dict) -> None:
+    """Run the selected web modules with pytest, then generate the Allure report.
+
+    pytest itself is blocking, so it runs in the default executor while the
+    websocket keeps streaming its output to Live Execution.
+    """
+    loop = asyncio.get_event_loop()
+    path_map = {t["path"]: t["name"] for t in tests}
+    args = list(options.get("targets") or path_map.keys())
+    if options.get("workers", 1) > 1:
+        args += ["-n", str(options["workers"]), "--dist", "loadfile"]
+
+    # The suite reads these in tests/web_automation/conftest.py.
+    extra_env = {
+        "WEB_BROWSER": options.get("browser") or "chromium",
+        "WEB_HEADLESS": "true" if options.get("headless") else "false",
+    }
+    if options.get("environment"):
+        extra_env["TEST_ENVIRONMENT"] = options["environment"]
+
+    await manager.broadcast({"type": "MODULES", "payload": {"run_id": run_id, "modules": tests}})
+    try:
+        ok = await loop.run_in_executor(
+            None, lambda: run_pytest_streaming_with_tracking(args, path_map, clean_allure=True, extra_env=extra_env)
+        )
+        await manager.broadcast({"type": "LOG", "payload": {
+            "message": "Web suite finished" + ("" if ok else " with failures"),
+            "status": "SUCCESS" if ok else "FAILED",
+        }})
+    except Exception as exc:                       # the run must never take the API down
+        logger.exception("Web run failed")
+        await manager.broadcast({"type": "LOG", "payload": {
+            "message": f"Web run failed: {exc}", "status": "FAILED",
+        }})
+        return
+
+    try:
+        write_allure_environment(PROJECT_ROOT, {
+            "Platform": "Web",
+            "TestTypes": _type_labels(options.get("test_types") or []),
+            "Environment": options.get("environment") or "Not set",
+            "Browser": options.get("browser") or "chromium",
+            "HeadlessMode": "Yes" if options.get("headless") else "No",
+            "Modules": ", ".join(t["name"] for t in tests),
+            "TestCases": str(options.get("case_count") or ""),
+        })
+        await loop.run_in_executor(None, lambda: generate_report(PROJECT_ROOT))
+    except Exception as exc:
+        await manager.broadcast({"type": "LOG", "payload": {
+            "message": f"Report generation failed: {exc}", "status": "WARN",
+        }})
+
+    runs.setdefault(run_id, {})["report_url"] = REPORT_URL
+    await manager.broadcast({"type": "RUN_COMPLETE", "payload": {"report_url": REPORT_URL}})
+
+
+async def start_web_test_flow(request, background_tasks, manager):
+    """Start a Playwright/pytest run for the selected web modules."""
+    selected = request.tests_to_run or []
+    valid = [t for t in selected if t.get("path") and os.path.isfile(os.path.join(PROJECT_ROOT, t["path"]))]
+    missing = [t.get("path") for t in selected if t not in valid]
+    if not valid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No runnable module found on disk{f' (missing: {missing})' if missing else ''}",
+        )
+
+    selection = _selection_for([t["path"] for t in valid], request.test_types)
+    if not selection["targets"]:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"No test case of type {_type_labels(request.test_types)} in the selected module(s). "
+                "Clear the test-type filter or pick modules that contain those test cases."
+            ),
+        )
+
+    run_id = new_run()
+    reset_run_state()
+    runs[run_id]["app_variant"] = "web"
+    runs[run_id]["app_name"] = "Web automation"
+    runs[run_id]["platform"] = "web"
+    runs[run_id]["test_types"] = list(request.test_types or [])
+    runs[run_id]["test_case_count"] = selection["case_count"]
+
+    await manager.broadcast({"type": "RUN_START", "payload": {}})
+    await manager.broadcast({"type": "LOG", "payload": {
+        "message": (
+            f"Running {selection['case_count']} test case(s) in {len(valid)} module(s): {[t['name'] for t in valid]}"
+            f" · test types: {_type_labels(request.test_types)}"
+            + (f" · environment {request.environment}" if request.environment else "")
+        ),
+        "status": "INFO",
+    }})
+    for skipped_module in selection["skipped"]:
+        await manager.broadcast({"type": "LOG", "payload": {
+            "message": f"Skipped {skipped_module['path']} — {skipped_module['reason']}", "status": "WARN",
+        }})
+    if missing:
+        await manager.broadcast({"type": "LOG", "payload": {
+            "message": f"Skipped {len(missing)} module(s) with no file on disk: {missing}", "status": "WARN",
+        }})
+
+    options = {
+        "workers": max(1, int(getattr(request, "workers", 1) or 1)),
+        "browser": getattr(request, "browser", None),
+        "headless": bool(getattr(request, "headless", False)),
+        "environment": getattr(request, "environment", None),
+        "test_types": list(request.test_types or []),
+        "targets": selection["targets"],
+        "case_count": selection["case_count"],
+    }
+    background_tasks.add_task(_run_web_suite, run_id, valid, options)
+
+    return {
+        "status": "success",
+        "message": "Web test run starting…",
+        "run_id": run_id,
+        "tests_to_run": valid,
+        "skipped": missing + [s["path"] for s in selection["skipped"]],
+        "test_types": list(request.test_types or []),
+        "test_case_count": selection["case_count"],
+    }
+
+
 def stop_test_flow(manager):
+    """Stop whatever is running: a legacy run, a download, or /api/v1 executions."""
     stopped = False
 
     global DOWNLOAD_PROCESS_OBJ
@@ -554,6 +736,13 @@ def stop_test_flow(manager):
 
     if stop_current_tests():
         stopped = True
+
+    # Runs started through /api/v1/executions own their own process.
+    from new_backend.orchestration.orchestrator import orchestrator
+
+    for context in orchestrator.manager.active():
+        if orchestrator.stop(context.run_id):
+            stopped = True
 
     return stopped
 

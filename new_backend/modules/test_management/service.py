@@ -8,6 +8,7 @@ code on disk. Latest outcomes are joined in from Allure via the test's
 """
 import ast
 import json
+import re
 import sys
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -17,6 +18,7 @@ from new_backend.core import state as core_state
 from new_backend.modules.reporting.service import load_latest_results
 from new_backend.modules.slack.config import APP_VARIANTS
 
+from . import test_types as tt
 from .store import list_manual_cases
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -52,8 +54,8 @@ def _classify(rel: Path) -> tuple[str, str]:
 
 
 def _decorator_meta(decorators: list[ast.expr]) -> tuple[dict, list[str]]:
-    """Pull allure metadata and pytest markers out of a decorator list."""
-    meta, markers = {}, []
+    """Pull allure metadata (incl. tags/labels) and pytest markers out of a decorator list."""
+    meta, markers = {"tags": [], "labels": {}}, []
     for dec in decorators:
         call = dec if isinstance(dec, ast.Call) else None
         target = call.func if call else dec
@@ -66,6 +68,12 @@ def _decorator_meta(decorators: list[ast.expr]) -> tuple[dict, list[str]]:
                 meta[target.attr] = str(arg.value)
             elif isinstance(arg, ast.Attribute):    # allure.severity_level.CRITICAL
                 meta[target.attr] = arg.attr.lower()
+        elif chain == "allure.tag" and call:        # @allure.tag("smoke", "regression")
+            meta["tags"] += [str(a.value) for a in call.args if isinstance(a, ast.Constant)]
+        elif chain == "allure.label" and call and len(call.args) >= 2:
+            name, value = call.args[0], call.args[1]
+            if isinstance(name, ast.Constant) and isinstance(value, ast.Constant):
+                meta["labels"][str(name.value)] = str(value.value)
         elif chain.startswith("pytest.mark."):
             markers.append(target.attr)
     return meta, markers
@@ -94,13 +102,19 @@ def discover_test_cases() -> list[dict]:
 
         def add(func, cls=None, cls_meta=None, cls_markers=()):
             meta, markers = _decorator_meta(func.decorator_list)
-            meta = {**(cls_meta or {}), **meta}
+            cls_meta = cls_meta or {}
+            merged = {**cls_meta, **meta}
+            merged["tags"] = [*cls_meta.get("tags", []), *meta.get("tags", [])]
+            merged["labels"] = {**cls_meta.get("labels", {}), **meta.get("labels", {})}
+            meta = merged
             markers = [*cls_markers, *markers]
+            declared_type = tt.from_metadata(markers, meta.get("tags", []), meta.get("labels"))
             full_name = f"{module}.{cls.name}#{func.name}" if cls else f"{module}#{func.name}"
             node_id = f"{rel.as_posix()}::{cls.name}::{func.name}" if cls else f"{rel.as_posix()}::{func.name}"
             result = latest.get(full_name)
             cases.append({
                 "id":          node_id,
+                "full_name":   full_name,           # allure's fullName — joins a case to its results
                 "name":        meta.get("title") or _humanize(func.name),
                 "function":    func.name,
                 "class_name":  cls.name if cls else None,
@@ -114,6 +128,10 @@ def discover_test_cases() -> list[dict]:
                 "story":       meta.get("story"),
                 "severity":    meta.get("severity", "normal"),
                 "markers":     markers,
+                "tags":        meta.get("tags", []),
+                "test_type":   declared_type or tt.default_test_type(),
+                "test_type_label": tt.label_for(declared_type or tt.default_test_type()),
+                "test_type_declared": bool(declared_type),
                 "skipped":     any(m in ("skip", "skipif") for m in markers),
                 "last_status":      result["status"] if result else None,
                 "last_duration_ms": result["duration_ms"] if result else None,
@@ -144,7 +162,8 @@ def _automated_view(case: dict) -> dict:
         "code":              case["function"],
         "title":             case["name"],
         "module":            case["feature"] or case["epic"] or case["suite_label"],
-        "test_type":         "Functional",
+        "test_type":         case["test_type"],
+        "test_type_label":   case["test_type_label"],
         "priority":          SEVERITY_PRIORITY.get(case["severity"], "Medium"),
         "automation_status": "Automated",
         "status":            "Deprecated" if case["skipped"] else "Active",
@@ -161,6 +180,12 @@ def _automated_view(case: dict) -> dict:
     }
 
 
+def _manual_type(case: dict) -> str:
+    """Stored type of a manual case; values written before test types were canonical
+    (e.g. "Negative", "Usability") keep working as custom ids."""
+    return tt.normalise(case.get("test_type")) or tt.default_test_type()
+
+
 def _manual_view(case: dict) -> dict:
     """A stored manual case in the shared Test Cases shape."""
     variant = case.get("variant") or None
@@ -174,7 +199,8 @@ def _manual_view(case: dict) -> dict:
         "file":              None,
         "line":              None,
         "module":            case.get("module") or "General",
-        "test_type":         case.get("test_type", "Functional"),
+        "test_type":         _manual_type(case),
+        "test_type_label":   tt.label_for(_manual_type(case)),
         "priority":          case.get("priority", "Medium"),
         "automation_status": case.get("automation_status", "Manual"),
         "status":            case.get("status", "Active"),
@@ -189,6 +215,8 @@ def _manual_view(case: dict) -> dict:
         "story":             None,
         "severity":          case.get("priority", "Medium").lower(),
         "markers":           [],
+        "tags":              [],
+        "test_type_declared": bool(case.get("test_type")),
         "skipped":           case.get("status") == "Deprecated",
         "description":       case.get("description", ""),
         "preconditions":     case.get("preconditions", ""),
@@ -221,6 +249,15 @@ def _outcomes(cases: list[dict]) -> dict:
     return counts
 
 
+def type_counts(cases: list[dict]) -> dict[str, int]:
+    """{test type id: number of cases} — what the type filters and chips count."""
+    counts: dict[str, int] = {}
+    for case in cases:
+        key = case.get("test_type") or tt.default_test_type()
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
 def list_suites() -> list[dict]:
     grouped = defaultdict(list)
     for case in discover_test_cases():
@@ -235,6 +272,7 @@ def list_suites() -> list[dict]:
             "total":    len(cases),
             "files":    sorted({c["file"] for c in cases}),
             "features": sorted({c["feature"] for c in cases if c["feature"]}),
+            "type_counts": type_counts(cases),
             **_outcomes(cases),
             "planned_modules": [m["name"] for m in APP_VARIANTS.get(suite_id, [])],
         })
@@ -274,6 +312,7 @@ def build_matrix() -> dict:
                 "path":       path,
                 "exists":     exists,
                 "test_count": len(cases),
+                "type_counts": type_counts(cases),
                 "status":     _aggregate_status(cases) if exists else "missing",
             })
         variants.append({
@@ -288,6 +327,131 @@ def build_matrix() -> dict:
         "planned_modules": planned,
         "implemented":     implemented,
         "coverage_pct":    round(implemented * 100 / planned, 1) if planned else None,
+    }
+
+
+# ── Runnable modules (Web Testing / Mobile Testing module pickers) ───────────
+
+def _module_label(path: str) -> str:
+    """'tests/web_automation/tests/test_farmer_onboarding.py' → 'Farmer Onboarding'."""
+    stem = Path(path).stem
+    stem = re.sub(r"(^test[_-]?|[_-]?test$|[_-]?pytest$)", "", stem, flags=re.I)
+    stem = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", stem)          # TestOnboarding → Onboarding
+    words = [w for w in re.split(r"[_\-\s]+", stem) if w]
+    return " ".join(w if w.isupper() else w.capitalize() for w in words) or Path(path).stem
+
+
+def _module_description(cases: list[dict]) -> str:
+    """The allure feature / epic / story the tests in a file declare, if any."""
+    for key in ("feature", "epic", "story"):
+        values = [c[key] for c in cases if c.get(key)]
+        if values:
+            return max(set(values), key=values.count)
+    return ""
+
+
+def _module_row(name: str, path: str, cases: list[dict], *, planned: bool) -> dict:
+    file = PROJECT_ROOT / path
+    exists = file.is_file()
+    return {
+        "id":           path,
+        "name":         name,
+        "description":  _module_description(cases),
+        "path":         path,
+        "exists":       exists,
+        "planned":      planned,
+        "test_count":   len(cases),
+        "type_counts":  type_counts(cases),
+        "last_updated": datetime.fromtimestamp(file.stat().st_mtime, tz=timezone.utc).isoformat() if exists else None,
+        "status":       _aggregate_status(cases) if exists and cases else ("not_run" if exists else "missing"),
+    }
+
+
+def list_modules(platform: str = "mobile", variant: str | None = None) -> dict:
+    """Modules that can be selected for a run, from the files on disk.
+
+    Web: one module per discovered web test file.
+    Mobile: the planned modules of one app variant (APP_VARIANTS), plus any
+    discovered file of that suite that is not in the plan — so nothing that
+    exists is hidden, and planned-but-missing files stay visible as missing.
+    """
+    by_file: dict[str, list[dict]] = defaultdict(list)
+    for case in discover_test_cases():
+        by_file[case["file"]].append(case)
+
+    if platform == "web":
+        modules = [
+            _module_row(_module_label(path), path, cases, planned=False)
+            for path, cases in sorted(by_file.items())
+            if cases[0]["platform"] == "web"
+        ]
+        return {
+            "platform": "web",
+            "variant": None,
+            "variants": [],
+            "modules": modules,
+            "total_tests": sum(m["test_count"] for m in modules),
+        }
+
+    variants = [
+        {"id": vid, "label": SUITE_LABELS.get(vid, vid), "modules": len(mods)}
+        for vid, mods in APP_VARIANTS.items()
+    ]
+    active = variant if variant in APP_VARIANTS else (variants[0]["id"] if variants else None)
+
+    modules, seen = [], set()
+    for module in APP_VARIANTS.get(active, []):
+        path = module["path"].replace("\\", "/")
+        seen.add(path)
+        modules.append(_module_row(module["name"], path, by_file.get(path, []), planned=True))
+    # Mobile files of this suite that exist on disk but are not in the plan.
+    for path, cases in sorted(by_file.items()):
+        if path not in seen and cases[0]["platform"] == "mobile" and cases[0]["suite"] == active:
+            modules.append(_module_row(_module_label(path), path, cases, planned=False))
+
+    return {
+        "platform": "mobile",
+        "variant": active,
+        "variants": variants,
+        "modules": modules,
+        "total_tests": sum(m["test_count"] for m in modules),
+    }
+
+
+def resolve_run_selection(paths: list[str], type_ids: list[str] | None = None) -> dict:
+    """Turn selected module paths + test types into the arguments pytest should run.
+
+    With no type selected the whole file runs (pytest gets the path). With types
+    selected only the matching test cases run, addressed by their node id — so the
+    filter follows the type assigned to each case, never a hard-coded rule.
+    """
+    wanted = [t for t in (type_ids or []) if t]
+    by_file: dict[str, list[dict]] = defaultdict(list)
+    for case in discover_test_cases():
+        by_file[case["file"]].append(case)
+
+    targets, selected, skipped = [], [], []
+    for path in paths:
+        cases = by_file.get(path, [])
+        if not wanted:
+            targets.append(path)
+            selected += cases
+            continue
+        matching = [c for c in cases if c["test_type"] in wanted]
+        if not matching:
+            skipped.append({"path": path, "reason": "no test case of the selected type(s)"})
+            continue
+        # A file whose every case matches runs as a file: clearer pytest output.
+        targets += [path] if len(matching) == len(cases) else [c["id"] for c in matching]
+        selected += matching
+
+    return {
+        "targets":     targets,
+        "test_types":  wanted,
+        "case_count":  len(selected),
+        "cases":       [{"id": c["id"], "name": c["name"], "test_type": c["test_type"]} for c in selected],
+        "type_counts": type_counts(selected),
+        "skipped":     skipped,
     }
 
 
@@ -324,6 +488,8 @@ def list_runs() -> list[dict]:
             "app_variant": rec.get("app_variant") or None,
             "variant_label": SUITE_LABELS.get(rec.get("app_variant") or "", None),
             "developer":   rec.get("developer_name") or None,
+            "test_types":  tt.describe(rec.get("test_types") or []),
+            "platform":    rec.get("platform") or None,
             "report_url":  rec.get("report_url"),
             "network_profile": (rec.get("network_config") or {}).get("profile") if isinstance(rec.get("network_config"), dict) else None,
         })

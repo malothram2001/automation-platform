@@ -15,6 +15,9 @@ from new_backend.modules.platform_hub.routes import router as platform_router
 from new_backend.modules.test_management.routes import router as test_management_router
 from new_backend.modules.reporting.routes import router as reports_router
 from new_backend.core.events import lifespan
+from new_backend.api.v1.router import api_router
+from new_backend.api.v1.executions import ws_router as executions_ws_router
+from new_backend.orchestration.execution_manager import execution_manager
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(
@@ -47,6 +50,19 @@ app.include_router(network_simulate_router, prefix="/network-simulate")
 app.include_router(platform_router, prefix="/platform")
 app.include_router(test_management_router, prefix="/test-management")
 app.include_router(reports_router, prefix="/reports")
+
+# Versioned API: one execution entry point for every test type. The routes above
+# stay mounted until every screen has migrated onto /api/v1.
+app.include_router(api_router, prefix="/api/v1")
+
+# The run-scoped socket lives next to the legacy /ws/test-status stream.
+app.include_router(executions_ws_router)
+
+
+@app.on_event("startup")
+async def _bind_execution_loop() -> None:
+    """Engine threads publish events through this loop."""
+    execution_manager.bind_loop(asyncio.get_running_loop())
 
 # Health Check
 

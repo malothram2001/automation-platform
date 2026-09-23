@@ -5,12 +5,13 @@
 import React, { useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import clsx from 'clsx';
-import { AlertTriangle, CheckCircle2, ChevronRight, CircleDashed, Inbox, RefreshCw, X, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronRight, CircleDashed, Inbox, Info, RefreshCw, X, XCircle } from 'lucide-react';
 import { findNavItem } from '../../config/navigation';
 import { API_URL } from '../../config/api';
 import useApi from '../../hooks/useApi';
 import { humanize, statusTone } from '../../utils/format';
 import './ui.css';
+import './screens.css';
 
 /* ─── Status ─────────────────────────────────────────────────────────────── */
 
@@ -38,10 +39,54 @@ export function Pill({ children, tone = 'muted' }) {
 
 /* ─── Layout ─────────────────────────────────────────────────────────────── */
 
-export function Page({ title, description, actions, meta, children, wide = false }) {
+export function Page({ title, description, actions, meta, children, wide = false, hero, crumb, aside }) {
   const { pathname } = useLocation();
   const item = findNavItem(pathname);
   const Icon = item?.icon;
+
+  if (hero) {
+    const HeroIcon = hero.icon || Icon;
+    return (
+      <div className={clsx('tap-page', wide && 'is-wide')}>
+        <header className="tap-hero">
+          <div className="tap-hero-main">
+            {HeroIcon && (
+              <span className={clsx('tap-hero-icon', hero.tone && `tone-${hero.tone}`)} aria-hidden>
+                <HeroIcon size={26} />
+              </span>
+            )}
+            <div className="tap-hero-text">
+              <h1 className="tap-hero-title">
+                {title || item?.label}
+                {meta}
+              </h1>
+              {description && <p className="tap-hero-desc">{description}</p>}
+            </div>
+          </div>
+          <div className="tap-hero-side">
+            {item && (
+              <nav className="tap-breadcrumb is-right" aria-label="Breadcrumb">
+                <span>{item.section}</span>
+                <ChevronRight size={12} aria-hidden />
+                <span>{item.label}</span>
+                {crumb && (
+                  <>
+                    <ChevronRight size={12} aria-hidden />
+                    <strong>{crumb}</strong>
+                  </>
+                )}
+              </nav>
+            )}
+            <div className="tap-hero-side-row">
+              {aside}
+              {actions && <div className="tap-page-actions">{actions}</div>}
+            </div>
+          </div>
+        </header>
+        {children}
+      </div>
+    );
+  }
 
   return (
     <div className={clsx('tap-page', wide && 'is-wide')}>
@@ -69,6 +114,112 @@ export function Page({ title, description, actions, meta, children, wide = false
       </header>
       {children}
     </div>
+  );
+}
+
+/** Numbered workspace section — "1. Execution Configuration". */
+export function StepPanel({ step, title, subtitle, icon: Icon, actions, children, className, flush = false }) {
+  return (
+    <section className={clsx('tap-step-panel', className)}>
+      <header className="tap-step-head">
+        <div className="tap-step-heading">
+          {step != null && <span className="tap-step-number" aria-hidden>{step}</span>}
+          <div>
+            <h2 className="tap-step-title">
+              {Icon && <Icon size={16} aria-hidden />}
+              {title}
+            </h2>
+            {subtitle && <p className="tap-step-sub">{subtitle}</p>}
+          </div>
+        </div>
+        {actions && <div className="tap-step-actions">{actions}</div>}
+      </header>
+      <div className={clsx('tap-step-body', flush && 'is-flush')}>{children}</div>
+    </section>
+  );
+}
+
+/** Labelled <select> used across the run-configuration rows. */
+export function SelectField({ label, value, onChange, options, hint, disabled, icon: Icon, id }) {
+  return (
+    <Field label={label} hint={hint}>
+      <span className={clsx('tap-select-wrap', Icon && 'has-icon')}>
+        {Icon && <Icon size={15} aria-hidden className="tap-select-icon" />}
+        <select
+          id={id}
+          className="tap-select"
+          value={value ?? ''}
+          disabled={disabled || !options.length}
+          onChange={(e) => onChange?.(e.target.value)}
+        >
+          {options.map((o) => (
+            <option key={o.value} value={o.value} disabled={o.disabled}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </span>
+    </Field>
+  );
+}
+
+/** Pill tab strip (Android / iOS, Emulator / Physical device). */
+export function PillTabs({ tabs, active, onChange, size }) {
+  return (
+    <div className={clsx('tap-pill-tabs', size && `is-${size}`)} role="tablist">
+      {tabs.map((tab) => {
+        const Icon = tab.icon;
+        return (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={active === tab.id}
+            disabled={tab.disabled}
+            title={tab.title}
+            className={clsx('tap-pill-tab', active === tab.id && 'is-active')}
+            onClick={() => !tab.disabled && onChange(tab.id)}
+          >
+            {Icon && <Icon size={15} aria-hidden />}
+            {tab.label}
+            {tab.count != null && <span className="tap-tab-count">{tab.count}</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Sticky footer holding the primary run actions. */
+export function RunBar({ summary, children }) {
+  return (
+    <div className="tap-run-bar">
+      {summary && <div className="tap-run-bar-summary">{summary}</div>}
+      <div className="tap-run-bar-actions">{children}</div>
+    </div>
+  );
+}
+
+/** Label/value line used in the run summary rail. */
+export function SummaryRow({ icon: Icon, label, value, tone }) {
+  return (
+    <div className="tap-summary-row">
+      <span className="tap-summary-label">
+        {Icon && <Icon size={15} aria-hidden />}
+        {label}
+      </span>
+      <span className={clsx('tap-summary-value', tone && `tone-${tone}`)}>{value ?? '—'}</span>
+    </div>
+  );
+}
+
+/** Blue "all test cases run automatically" banner from the reference screens. */
+export function InfoNote({ children, tone = 'info' }) {
+  return (
+    <p className={clsx('tap-info-note', `tone-${tone}`)}>
+      <Info size={15} aria-hidden />
+      <span>{children}</span>
+    </p>
   );
 }
 
@@ -120,6 +271,43 @@ export function StatCard({ label, value, hint, icon: Icon, tone = 'primary', to 
     </>
   );
   return to ? <Link to={to} className="tap-stat is-link">{body}</Link> : <div className="tap-stat">{body}</div>;
+}
+
+/** Headline metric tile: coloured icon, count and a factual sub-line. */
+export function MetricCard({ label, value, hint, icon: Icon, tone = 'primary', to, foot }) {
+  const body = (
+    <>
+      <span className={clsx('tap-metric-icon', `tone-${tone}`)} aria-hidden>
+        {Icon && <Icon size={22} />}
+      </span>
+      <div className="tap-metric-body">
+        <span className="tap-metric-label">{label}</span>
+        <div className="tap-metric-value">{value ?? '—'}</div>
+        {hint && <div className="tap-metric-hint">{hint}</div>}
+      </div>
+      {foot}
+    </>
+  );
+  return to ? <Link to={to} className="tap-metric is-link">{body}</Link> : <div className="tap-metric">{body}</div>;
+}
+
+export function MetricGrid({ children }) {
+  return <div className="tap-metric-grid">{children}</div>;
+}
+
+/** Quick-action tile: icon, action name, one line of explanation. */
+export function ActionTile({ icon: Icon, title, description, to, onClick, tone = 'primary' }) {
+  const body = (
+    <>
+      <span className={clsx('tap-action-icon', `tone-${tone}`)} aria-hidden>{Icon && <Icon size={18} />}</span>
+      <span className="tap-action-body">
+        <span className="tap-action-title">{title}</span>
+        <span className="tap-action-desc">{description}</span>
+      </span>
+    </>
+  );
+  if (to) return <Link to={to} className="tap-action-tile">{body}</Link>;
+  return <button type="button" className="tap-action-tile" onClick={onClick}>{body}</button>;
 }
 
 /** Underlined tab strip, as used across the reference workspaces. */
